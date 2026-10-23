@@ -220,14 +220,19 @@ li.done .due{opacity:.6}
     taskGroups.hidden=false; historyCard.hidden=true;
     var shown=live.filter(function(t){return filter==="all"||(filter==="done"?t.done:!t.done)});
     taskGroups.innerHTML="";
-    shown.sort(function(a,b){return b.createdAt-a.createdAt;});
-    var lastDay="", groupList=null;
+    shown.sort(function(a,b){
+      if(!a.due) return b.due?1:(b.createdAt-a.createdAt);
+      if(!b.due) return -1;
+      return a.due===b.due?b.createdAt-a.createdAt:(a.due<b.due?-1:1);
+    });
+    var lastDay=null, groupList=null;
     shown.forEach(function(t){
-      var createdAt=Number.isFinite(t.createdAt)?t.createdAt:Date.now(), day=dstr(new Date(createdAt));
+      var day=t.due||"no-due";
       if(day!==lastDay){
         lastDay=day;
         var group=document.createElement("section"); group.className="card task-group";
-        var heading=document.createElement("div"); heading.className="dayhead"; heading.textContent=dayLabel(createdAt);
+        var heading=document.createElement("div"); heading.className="dayhead";
+        heading.textContent=t.due?dayLabel(new Date(t.due+"T00:00:00").getTime()):"No due date";
         groupList=document.createElement("ul"); group.appendChild(heading); group.appendChild(groupList); taskGroups.appendChild(group);
       }
       var li=document.createElement("li"); if(t.done) li.className="done";
