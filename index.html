@@ -161,6 +161,19 @@ li.done .due{opacity:.6}
     if(s===dstr(tm)) return "Tomorrow";
     return new Date(s+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short"});
   }
+  var newDue=document.getElementById("newDue"), dueDateKey="todo-due-date-v1";
+  try{
+    var savedDue=JSON.parse(localStorage.getItem(dueDateKey));
+    if(savedDue&&savedDue.day===dstr(new Date())&&/^\d{4}-\d{2}-\d{2}$/.test(savedDue.value)){
+      newDue.value=savedDue.value;
+    } else localStorage.removeItem(dueDateKey);
+  }catch(e){}
+  newDue.onchange=function(){
+    try{
+      if(newDue.value) localStorage.setItem(dueDateKey,JSON.stringify({day:dstr(new Date()),value:newDue.value}));
+      else localStorage.removeItem(dueDateKey);
+    }catch(e){}
+  };
   var history=[], updated=0;
   function adopt(s){
     tasks=s.tasks||[]; history=s.history||[]; updated=s.updated||0;
@@ -169,6 +182,16 @@ li.done .due{opacity:.6}
       var created=history.filter(function(e){return e.tid===t.id&&e.type==="created";})[0];
       var fromId=Number(t.id);
       t.createdAt=created?created.time:(Number.isFinite(fromId)&&fromId>0?fromId:Date.now());
+    });
+    tasks.forEach(function(t){
+      if(!t.done||Number.isFinite(t.completedAt)) return;
+      for(var i=history.length-1;i>=0;i--){
+        var event=history[i];
+        if(event.tid===t.id&&(event.type==="completed"||event.type==="reopened")){
+          if(event.type==="completed") t.completedAt=event.time;
+          break;
+        }
+      }
     });
   }
   try{ var raw=localStorage.getItem(STATE); if(raw){ adopt(JSON.parse(raw)); } else { var old=localStorage.getItem(KEY); if(old) tasks=JSON.parse(old)||[]; } }catch(e){ tasks=[]; history=[]; }
@@ -208,8 +231,14 @@ li.done .due{opacity:.6}
     count.textContent=left+(left===1?" task left":" tasks left");
     clearBtn.hidden=filter==="history"||!live.some(function(t){return t.done});
     document.getElementById("historyActions").hidden=filter!=="history";
-    var total=live.length, doneN=total-left, pct=total?Math.round(doneN/total*100):0;
-    document.getElementById("ptext").textContent=total?doneN+" of "+total+" completed":"No tasks yet";
+    var today=dstr(new Date());
+    var daily=live.filter(function(t){return t.due===today});
+    var total=daily.length;
+    var doneN=daily.filter(function(t){
+      return t.done&&Number.isFinite(t.completedAt)&&dstr(new Date(t.completedAt))===today;
+    }).length;
+    var pct=total?Math.round(doneN/total*100):0;
+    document.getElementById("ptext").textContent=total?doneN+" of "+total+" completed today":"No tasks due today";
     document.getElementById("ppct").textContent=pct+"%";
     document.getElementById("fill").style.width=pct+"%";
     document.getElementById("bar").setAttribute("aria-valuenow",pct);
@@ -238,7 +267,11 @@ li.done .due{opacity:.6}
       var li=document.createElement("li"); if(t.done) li.className="done";
       var cb=document.createElement("input"); cb.type="checkbox"; cb.className="check"; cb.checked=t.done;
       cb.setAttribute("aria-label","Mark “"+t.text+"” as completed");
-      cb.onchange=function(){ t.done=cb.checked; log(t.done?"completed":"reopened",t); save(); render(); };
+      cb.onchange=function(){
+        t.done=cb.checked;
+        if(t.done) t.completedAt=Date.now(); else delete t.completedAt;
+        log(t.done?"completed":"reopened",t); save(); render();
+      };
       li.appendChild(cb);
       if(editing===t.id){
         var ed=document.createElement("input"); ed.type="text"; ed.className="edit"; ed.value=t.text; ed.setAttribute("aria-label","Edit task");
@@ -280,9 +313,9 @@ li.done .due{opacity:.6}
   document.getElementById("addForm").onsubmit=function(e){
     e.preventDefault(); var v=input.value.trim(); if(!v) return;
     var createdAt=Date.now();
-    var nt={id:createdAt+Math.random(),createdAt:createdAt,text:v,done:false,p:document.getElementById("newPri").value,due:document.getElementById("newDue").value||""};
+    var nt={id:createdAt+Math.random(),createdAt:createdAt,text:v,done:false,p:document.getElementById("newPri").value,due:newDue.value||""};
     tasks.unshift(nt); log("created",nt);
-    input.value=""; document.getElementById("newDue").value=""; save(); render(); input.focus();
+    input.value=""; save(); render(); input.focus();
   };
   clearBtn.onclick=function(){ tasks.forEach(function(t){ if(t.done&&!t.del){ t.del=Date.now(); log("cleared",t); } }); save(); render(); };
   Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(b){
@@ -299,7 +332,21 @@ li.done .due{opacity:.6}
   function paint(){ var d=isDark(), l=d?"Switch to light mode":"Switch to dark mode"; tbtn.innerHTML=d?SUN:MOON; tbtn.setAttribute("aria-label",l); tbtn.title=l; }
   try{ var st=localStorage.getItem(THEME); if(st) root.setAttribute("data-theme",st); }catch(e){}
   tbtn.onclick=function(){ var n=isDark()?"light":"dark"; root.setAttribute("data-theme",n); try{ localStorage.setItem(THEME,n); }catch(e){} paint(); };
-  document.getElementById("todayDate").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
+  function updateTodayDate(){
+    document.getElementById("todayDate").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
+  }
+  var displayedDay=dstr(new Date());
+  updateTodayDate();
+  setInterval(function(){
+    var today=dstr(new Date());
+    if(today!==displayedDay){
+      displayedDay=today;
+      newDue.value="";
+      try{ localStorage.removeItem(dueDateKey); }catch(e){}
+      updateTodayDate();
+      render();
+    }
+  },60000);
   if(window.claude&&claude.use){
     Promise.all([claude.use("db"),claude.use("user")]).then(function(r){
       var db=r[0], user=r[1]; if(!db||!user) return;
